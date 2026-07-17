@@ -59,7 +59,6 @@ if not st.session_state["autenticado"]:
                     break
             
             if cliente_encontrado:
-                # Obtenemos el nombre usando exactamente tu encabezado de columna B
                 nombre = cliente_encontrado.get("Nombre / Razón Social", "Cliente")
                 clave_guardada = str(cliente_encontrado.get("Clave", "")).strip()
                 
@@ -149,15 +148,15 @@ else:
                 except:
                     return 0.0
 
-            # Los inputs cargan automáticamente el valor que YA está guardado en el Sheets para ese día
-            cant_pan = st.number_input("Pan (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Pan")), step=0.5)
-            cant_minon = st.number_input("Miñon (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Miñon")), step=0.5)
-            cant_galletas = st.number_input("Galletas (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Galletas")), step=0.5)
-            cant_figaza = st.number_input("Figaza (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Figaza")), step=0.5)
-            cant_negritos = st.number_input("Negritos (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Negritos")), step=0.5)
+            # --- CORRECCIÓN CLAVE AQUÍ: Se cambiaron las keys para que coincidan con tus columnas reales ---
+            cant_pan = st.number_input("Pan (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Pan")), step=0.5)
+            cant_minon = st.number_input("Miñon (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Miñon")), step=0.5)
+            cant_galletas = st.number_input("Galletas (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Galletas")), step=0.5)
+            cant_figaza = st.number_input("Figaza (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Figaza")), step=0.5)
+            cant_negritos = st.number_input("Negritos (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Negritos")), step=0.5)
             
             try:
-                val_facturas = int(fila_cliente.get("Facturas", 0)) if fila_cliente.get("Facturas") else 0
+                val_facturas = int(fila_cliente.get("Cant_Facturas", 0)) if fila_cliente.get("Cant_Facturas") else 0
             except:
                 val_facturas = 0
             cant_facturas = st.number_input("Facturas (docenas):", min_value=0, value=val_facturas, step=1)
@@ -166,7 +165,7 @@ else:
             
             if st.button("💾 GUARDAR CAMBIOS", use_container_width=True):
                 with st.spinner("Actualizando tu pedido en el sistema..."):
-                    # Mantenemos exactamente las columnas de actualización que ya tenías para tus días
+                    # Se mantiene la escritura en las posiciones de columnas correspondientes (3 a 8)
                     sheet_dia.update_cell(num_fila, 3, cant_pan)
                     sheet_dia.update_cell(num_fila, 4, cant_minon)
                     sheet_dia.update_cell(num_fila, 5, cant_galletas)
