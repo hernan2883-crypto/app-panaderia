@@ -3,19 +3,18 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import hashlib
+import datetime
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Pedidos Rey de la Harina", page_icon="🍞", layout="centered")
 
 # --- FUNCIÓN PARA ENCRIPTAR CONTRASEÑAS ---
 def encriptar_clave(password):
-    # Transforma la clave en un hash irreversible usando SHA-256
     return hashlib.sha256(password.encode()).hexdigest()
 
 # --- CONEXIÓN CON GOOGLE SHEETS ---
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 try:
-    # Leemos el JSON directo como texto desde los secretos de Streamlit
     info_credenciales = json.loads(st.secrets["gcp_json"])
     creds = Credentials.from_service_account_info(info_credenciales, scopes=scope)
     client = gspread.authorize(creds)
@@ -44,25 +43,23 @@ if not st.session_state["autenticado"]:
     
     if id_input:
         try:
-            # Traemos la pestaña de control de Clientes
             sheet_clientes = ss.worksheet("Clientes")
             clientes_data = sheet_clientes.get_all_records()
             
             cliente_encontrado = None
             fila_cliente_idx = 0
             
-            # Buscamos al cliente en la base de control
             for idx, c in enumerate(clientes_data):
                 if str(c.get("ID_Cliente")).strip() == id_input:
                     cliente_encontrado = c
-                    fila_cliente_idx = idx + 2  # +2 por el encabezado en Sheets (index 1)
+                    fila_cliente_idx = idx + 2
                     break
             
             if cliente_encontrado:
                 nombre = cliente_encontrado.get("Nombre / Razón Social", "Cliente")
                 clave_guardada = str(cliente_encontrado.get("Clave", "")).strip()
                 
-                # CASO A: El cliente entra por primera vez (no tiene clave registrada en Columna F)
+                # Registro por primera vez (Columna F / 6)
                 if not clave_guardada:
                     st.info(f"¡Hola **{nombre}**! Detectamos que es tu primera vez en la app. Creá tu contraseña personal de acceso:")
                     nueva_clave = st.text_input("Definí tu nueva contraseña propia:", type="password")
@@ -72,10 +69,8 @@ if not st.session_state["autenticado"]:
                         if nueva_clave and nueva_clave == nueva_clave_confirm:
                             with st.spinner("Registrando tu clave de forma segura..."):
                                 clave_hash = encriptar_clave(nueva_clave)
-                                # Guardamos el Hash en la columna F (Columna 6)
                                 sheet_clientes.update_cell(fila_cliente_idx, 6, clave_hash)
                                 
-                                # Logueamos al usuario de forma automática
                                 st.session_state["autenticado"] = True
                                 st.session_state["id_cliente"] = id_input
                                 st.session_state["nombre_cliente"] = nombre
@@ -86,7 +81,7 @@ if not st.session_state["autenticado"]:
                         else:
                             st.error("❌ Por favor, ingresá una contraseña válida.")
                 
-                # CASO B: El cliente ya está registrado, le pedimos su clave propia
+                # Login normal
                 else:
                     clave_ingresada = st.text_input("Ingresá tu contraseña de acceso:", type="password")
                     
@@ -106,9 +101,8 @@ if not st.session_state["autenticado"]:
         except Exception as e:
             st.error(f"Error: {e}")
 
-# 2. SECCIÓN PRIVADA (SOLO CLIENTES AUTENTICADOS)
+# 2. SECCIÓN PRIVADA (CLIENTES AUTENTICADOS)
 else:
-    # Encabezado de bienvenida y botón de salida
     col_user, col_logout = st.columns([3, 1])
     with col_user:
         st.success(f"Bienvenido/a, **{st.session_state['nombre_cliente']}**")
@@ -121,9 +115,42 @@ else:
             
     st.markdown("---")
     
-    # Selector de días
+    # --- CONTROL DE HORARIO Y BLOQUEO ---
+    # Obtenemos la hora local de Argentina (UTC-3) para evitar desfases del servidor
+    arg_tz = datetime.timezone(datetime.timedelta(hours=-3))
+    ahora = datetime.datetime.now(datetime.timezone.utc).astimezone(arg_tz)
+    
+    # Mostramos la hora oficial al cliente para que no haya dudas
+    st.caption(f"🕒 Hora oficial del sistema: **{ahora.strftime('%d/%m/%Y %H:%M')} hs** (Arg)")
+    
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     dia_seleccionado = st.selectbox("¿Para qué día querés ver/modificar tu pedido?", dias_semana)
+    
+    # Calculamos si el día seleccionado está bloqueado
+    indice_hoy = ahora.weekday()  # Lunes=0, Domingo=6
+    indice_seleccionado = dias_semana.index(dia_seleccionado)
+    
+    # Diferencia de días entre hoy y el día seleccionado
+    diff_dias = (indice_seleccionado - indice_hoy) % 7
+    
+    bloqueado = False
+    motivo_bloqueo = ""
+    
+    if diff_dias == 0:
+        bloqueado = True
+        motivo_bloqueo = f"Hoy es {dia_seleccionado}. Las entregas de hoy ya están en curso."
+    elif diff_dias == 1:
+        # Si es para mañana, el límite es hoy antes de las 09:00 AM
+        if ahora.time() >= datetime.time(9, 0):
+            bloqueado = True
+            motivo_bloqueo = f"El pedido para mañana ({dia_seleccionado}) cerró hoy a las 09:00 AM."
+
+    if bloqueado:
+        st.error(f"🔒 **PEDIDO BLOQUEADO:** {motivo_bloqueo} Solo podés ver las cantidades agendadas.")
+    else:
+        st.info("🔓 **Pedido abierto:** Podés realizar modificaciones para este día.")
+
+    st.markdown("---")
     
     try:
         sheet_dia = ss.worksheet(dia_seleccionado)
@@ -132,7 +159,6 @@ else:
         fila_cliente = None
         num_fila = 0
         
-        # Buscamos el pedido cargado para este cliente en el día seleccionado
         for idx, fila in enumerate(datos):
             if str(fila.get("ID_Cliente")).strip() == st.session_state["id_cliente"]:
                 fila_cliente = fila
@@ -140,41 +166,89 @@ else:
                 break
                 
         if fila_cliente:
-            st.write(f"Este es tu pedido agendado para el **{dia_seleccionado}**. Modificá los valores que necesites cambiar:")
-            
             def limpiar_valor(val):
                 try:
                     return float(str(val).replace(',', '.')) if val else 0.0
                 except:
                     return 0.0
 
-            # --- CORRECCIÓN CLAVE AQUÍ: Se cambiaron las keys para que coincidan con tus columnas reales ---
-            cant_pan = st.number_input("Pan (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Pan")), step=0.5)
-            cant_minon = st.number_input("Miñon (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Miñon")), step=0.5)
-            cant_galletas = st.number_input("Galletas (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Galletas")), step=0.5)
-            cant_figaza = st.number_input("Figaza (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Figaza")), step=0.5)
-            cant_negritos = st.number_input("Negritos (kg):", min_value=0.0, value=limpiar_valor(fila_cliente.get("Cant_Negritos")), step=0.5)
-            
+            # Guardamos los valores ORIGINALES para comparar si hay cambios reales
+            orig_pan = limpiar_valor(fila_cliente.get("Cant_Pan"))
+            orig_minon = limpiar_valor(fila_cliente.get("Cant_Miñon"))
+            orig_galletas = limpiar_valor(fila_cliente.get("Cant_Galletas"))
+            orig_figaza = limpiar_valor(fila_cliente.get("Cant_Figaza"))
+            orig_negritos = limpiar_valor(fila_cliente.get("Cant_Negritos"))
             try:
-                val_facturas = int(fila_cliente.get("Cant_Facturas", 0)) if fila_cliente.get("Cant_Facturas") else 0
+                orig_facturas = int(fila_cliente.get("Cant_Facturas", 0)) if fila_cliente.get("Cant_Facturas") else 0
             except:
-                val_facturas = 0
-            cant_facturas = st.number_input("Facturas (docenas):", min_value=0, value=val_facturas, step=1)
+                orig_facturas = 0
+
+            # Inputs (se deshabilitan automáticamente si está bloqueado)
+            cant_pan = st.number_input("Pan (kg):", min_value=0.0, value=orig_pan, step=0.5, disabled=bloqueado)
+            cant_minon = st.number_input("Miñon (kg):", min_value=0.0, value=orig_minon, step=0.5, disabled=bloqueado)
+            cant_galletas = st.number_input("Galletas (kg):", min_value=0.0, value=orig_galletas, step=0.5, disabled=bloqueado)
+            cant_figaza = st.number_input("Figaza (kg):", min_value=0.0, value=orig_figaza, step=0.5, disabled=bloqueado)
+            cant_negritos = st.number_input("Negritos (kg):", min_value=0.0, value=orig_negritos, step=0.5, disabled=bloqueado)
+            cant_facturas = st.number_input("Facturas (docenas):", min_value=0, value=orig_facturas, step=1, disabled=bloqueado)
 
             st.markdown("---")
             
-            if st.button("💾 GUARDAR CAMBIOS", use_container_width=True):
-                with st.spinner("Actualizando tu pedido en el sistema..."):
-                    # Se mantiene la escritura en las posiciones de columnas correspondientes (3 a 8)
-                    sheet_dia.update_cell(num_fila, 3, cant_pan)
-                    sheet_dia.update_cell(num_fila, 4, cant_minon)
-                    sheet_dia.update_cell(num_fila, 5, cant_galletas)
-                    sheet_dia.update_cell(num_fila, 6, cant_figaza)
-                    sheet_dia.update_cell(num_fila, 7, cant_negritos)
-                    sheet_dia.update_cell(num_fila, 8, cant_facturas)
-                    
-                    st.balloons()
-                    st.success(f"¡Pedido de {dia_seleccionado} modificado con éxito!")
+            # El botón de guardar solo está activo si el día no está bloqueado
+            if not bloqueado:
+                if st.button("💾 GUARDAR CAMBIOS", use_container_width=True):
+                    with st.spinner("Actualizando tu pedido y registrando cambios..."):
+                        
+                        # 1. DETECTAR CAMBIOS Y PREPARAR HISTORIAL
+                        cambios = []
+                        if cant_pan != orig_pan:
+                            cambios.append(("Pan (kg)", cant_pan))
+                        if cant_minon != orig_minon:
+                            cambios.append(("Miñon (kg)", cant_minon))
+                        if cant_galletas != orig_galletas:
+                            cambios.append(("Galletas (kg)", cant_galletas))
+                        if cant_figaza != orig_figaza:
+                            cambios.append(("Figaza (kg)", cant_figaza))
+                        if cant_negritos != orig_negritos:
+                            cambios.append(("Negritos (kg)", cant_negritos))
+                        if cant_facturas != orig_facturas:
+                            cambios.append(("Facturas (docenas)", cant_facturas))
+                        
+                        # 2. ACTUALIZAR PLANILLA PRINCIPAL
+                        sheet_dia.update_cell(num_fila, 3, cant_pan)
+                        sheet_dia.update_cell(num_fila, 4, cant_minon)
+                        sheet_dia.update_cell(num_fila, 5, cant_galletas)
+                        sheet_dia.update_cell(num_fila, 6, cant_figaza)
+                        sheet_dia.update_cell(num_fila, 7, cant_negritos)
+                        sheet_dia.update_cell(num_fila, 8, cant_facturas)
+                        
+                        # 3. ESCRIBIR EN EL REGISTRO DE MODIFICACIONES (Si hubo cambios)
+                        if cambios:
+                            try:
+                                sheet_registro = ss.worksheet("Registro_Modificaciones")
+                                filas_nuevas = []
+                                timestamp_str = ahora.strftime("%Y-%m-%d %H:%M:%S")
+                                
+                                for producto, nueva_cant in cambios:
+                                    # Columnas: Timestamp | ID_Cliente | Cliente | Producto | Nueva_Cantidad | Fecha_Entrega
+                                    filas_nuevas.append([
+                                        timestamp_str,
+                                        st.session_state["id_cliente"],
+                                        st.session_state["nombre_cliente"],
+                                        producto,
+                                        nueva_cant,
+                                        dia_seleccionado
+                                    ])
+                                
+                                # Usamos append_rows para enviar todos los registros juntos (ahorra tiempo de carga)
+                                sheet_registro.append_rows(filas_nuevas)
+                            except Exception as err_reg:
+                                st.warning(f"Se actualizó el pedido, pero hubo un inconveniente al guardar el historial: {err_reg}")
+                        
+                        st.balloons()
+                        st.success(f"¡Pedido de {dia_seleccionado} modificado con éxito!")
+                        st.rerun()
+            else:
+                st.warning("⚠️ No se pueden guardar cambios porque el plazo de edición expiró.")
         else:
             st.warning(f"⚠️ No encontramos un pedido base registrado para tu ID el día **{dia_seleccionado}**.")
             
