@@ -6,7 +6,7 @@ import hashlib
 import datetime
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Pedidos Rey de la Harina", page_icon="🍞", layout="centered")
+st.set_page_config(page_title="Panadería Los Lubo's", page_icon="🍞", layout="centered")
 
 # --- FUNCIÓN PARA ENCRIPTAR CONTRASEÑAS ---
 def encriptar_clave(password):
@@ -32,7 +32,7 @@ if "nombre_cliente" not in st.session_state:
     st.session_state["nombre_cliente"] = None
 
 # --- INTERFAZ DE LA APP ---
-st.title("🍞 El Rey de la Harina")
+st.title("🍞 Panadería Los Lubo's")
 
 # 1. FLUJO DE INICIO DE SESIÓN / REGISTRO
 if not st.session_state["autenticado"]:
@@ -59,9 +59,9 @@ if not st.session_state["autenticado"]:
                 nombre = cliente_encontrado.get("Nombre / Razón Social", "Cliente")
                 clave_guardada = str(cliente_encontrado.get("Clave", "")).strip()
                 
-                # Registro por primera vez (Columna F / 6)
+                # Registro por primera vez
                 if not clave_guardada:
-                    st.info(f"¡Hola **{nombre}**! Detectamos que es tu primera vez en la app. Creá tu contraseña personal de acceso:")
+                    st.info(f"¡Hola **{nombre}**! Detectamos que es tu primera vez en la app de la panadería. Creá tu contraseña personal de acceso:")
                     nueva_clave = st.text_input("Definí tu nueva contraseña propia:", type="password")
                     nueva_clave_confirm = st.text_input("Confirmá tu contraseña:", type="password")
                     
@@ -116,21 +116,17 @@ else:
     st.markdown("---")
     
     # --- CONTROL DE HORARIO Y BLOQUEO ---
-    # Obtenemos la hora local de Argentina (UTC-3) para evitar desfases del servidor
+    # Hora oficial de Argentina (UTC-3)
     arg_tz = datetime.timezone(datetime.timedelta(hours=-3))
     ahora = datetime.datetime.now(datetime.timezone.utc).astimezone(arg_tz)
     
-    # Mostramos la hora oficial al cliente para que no haya dudas
     st.caption(f"🕒 Hora oficial del sistema: **{ahora.strftime('%d/%m/%Y %H:%M')} hs** (Arg)")
     
     dias_semana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     dia_seleccionado = st.selectbox("¿Para qué día querés ver/modificar tu pedido?", dias_semana)
     
-    # Calculamos si el día seleccionado está bloqueado
-    indice_hoy = ahora.weekday()  # Lunes=0, Domingo=6
+    indice_hoy = ahora.weekday()
     indice_seleccionado = dias_semana.index(dia_seleccionado)
-    
-    # Diferencia de días entre hoy y el día seleccionado
     diff_dias = (indice_seleccionado - indice_hoy) % 7
     
     bloqueado = False
@@ -138,9 +134,9 @@ else:
     
     if diff_dias == 0:
         bloqueado = True
-        motivo_bloqueo = f"Hoy es {dia_seleccionado}. Las entregas de hoy ya están en curso."
+        motivo_bloqueo = f"Hoy es {dia_seleccionado}. Las entregas de hoy ya están en reparto."
     elif diff_dias == 1:
-        # Si es para mañana, el límite es hoy antes de las 09:00 AM
+        # Límite: hoy antes de las 09:00 AM para los pedidos de mañana
         if ahora.time() >= datetime.time(9, 0):
             bloqueado = True
             motivo_bloqueo = f"El pedido para mañana ({dia_seleccionado}) cerró hoy a las 09:00 AM."
@@ -172,7 +168,6 @@ else:
                 except:
                     return 0.0
 
-            # Guardamos los valores ORIGINALES para comparar si hay cambios reales
             orig_pan = limpiar_valor(fila_cliente.get("Cant_Pan"))
             orig_minon = limpiar_valor(fila_cliente.get("Cant_Miñon"))
             orig_galletas = limpiar_valor(fila_cliente.get("Cant_Galletas"))
@@ -183,7 +178,7 @@ else:
             except:
                 orig_facturas = 0
 
-            # Inputs (se deshabilitan automáticamente si está bloqueado)
+            # Inputs deshabilitados automáticamente si el horario venció
             cant_pan = st.number_input("Pan (kg):", min_value=0.0, value=orig_pan, step=0.5, disabled=bloqueado)
             cant_minon = st.number_input("Miñon (kg):", min_value=0.0, value=orig_minon, step=0.5, disabled=bloqueado)
             cant_galletas = st.number_input("Galletas (kg):", min_value=0.0, value=orig_galletas, step=0.5, disabled=bloqueado)
@@ -193,12 +188,10 @@ else:
 
             st.markdown("---")
             
-            # El botón de guardar solo está activo si el día no está bloqueado
             if not bloqueado:
                 if st.button("💾 GUARDAR CAMBIOS", use_container_width=True):
                     with st.spinner("Actualizando tu pedido y registrando cambios..."):
                         
-                        # 1. DETECTAR CAMBIOS Y PREPARAR HISTORIAL
                         cambios = []
                         if cant_pan != orig_pan:
                             cambios.append(("Pan (kg)", cant_pan))
@@ -213,7 +206,6 @@ else:
                         if cant_facturas != orig_facturas:
                             cambios.append(("Facturas (docenas)", cant_facturas))
                         
-                        # 2. ACTUALIZAR PLANILLA PRINCIPAL
                         sheet_dia.update_cell(num_fila, 3, cant_pan)
                         sheet_dia.update_cell(num_fila, 4, cant_minon)
                         sheet_dia.update_cell(num_fila, 5, cant_galletas)
@@ -221,7 +213,7 @@ else:
                         sheet_dia.update_cell(num_fila, 7, cant_negritos)
                         sheet_dia.update_cell(num_fila, 8, cant_facturas)
                         
-                        # 3. ESCRIBIR EN EL REGISTRO DE MODIFICACIONES (Si hubo cambios)
+                        # Guardado automático en el Registro de Modificaciones
                         if cambios:
                             try:
                                 sheet_registro = ss.worksheet("Registro_Modificaciones")
@@ -229,7 +221,6 @@ else:
                                 timestamp_str = ahora.strftime("%Y-%m-%d %H:%M:%S")
                                 
                                 for producto, nueva_cant in cambios:
-                                    # Columnas: Timestamp | ID_Cliente | Cliente | Producto | Nueva_Cantidad | Fecha_Entrega
                                     filas_nuevas.append([
                                         timestamp_str,
                                         st.session_state["id_cliente"],
@@ -239,16 +230,15 @@ else:
                                         dia_seleccionado
                                     ])
                                 
-                                # Usamos append_rows para enviar todos los registros juntos (ahorra tiempo de carga)
                                 sheet_registro.append_rows(filas_nuevas)
                             except Exception as err_reg:
-                                st.warning(f"Se actualizó el pedido, pero hubo un inconveniente al guardar el historial: {err_reg}")
+                                st.warning(f"Se guardó el pedido, pero hubo un error en el historial: {err_reg}")
                         
                         st.balloons()
                         st.success(f"¡Pedido de {dia_seleccionado} modificado con éxito!")
                         st.rerun()
             else:
-                st.warning("⚠️ No se pueden guardar cambios porque el plazo de edición expiró.")
+                st.warning("⚠️ El plazo de edición expiró.")
         else:
             st.warning(f"⚠️ No encontramos un pedido base registrado para tu ID el día **{dia_seleccionado}**.")
             
